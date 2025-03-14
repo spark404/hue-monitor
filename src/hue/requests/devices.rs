@@ -1,4 +1,4 @@
-use crate::hue::requests::{GenericResponse, Request};
+use crate::hue::requests::{GenericResponse, Id, Request};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
@@ -9,6 +9,8 @@ pub struct DevicesRequest {}
 pub struct DeviceRequest {
     pub id: String,
 }
+
+type DeviceResponse = GenericResponse<Device>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ProductData {
@@ -64,8 +66,14 @@ pub struct Device {
     pub services: Vec<ResourceIdentifier>,
 }
 
+impl Id for Device {
+    fn id(&self) -> Cow<str> {
+        Cow::from(&self.id)
+    }
+}
+
 impl Request for DevicesRequest {
-    type Response = GenericResponse<Device>;
+    type Response = DeviceResponse;
     type Body = ();
 
     fn endpoint(&self) -> Cow<str> {
@@ -74,7 +82,7 @@ impl Request for DevicesRequest {
 }
 
 impl Request for DeviceRequest {
-    type Response = GenericResponse<Device>;
+    type Response = DeviceResponse;
     type Body = ();
 
     fn endpoint(&self) -> Cow<str> {

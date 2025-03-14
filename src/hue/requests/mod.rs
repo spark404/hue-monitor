@@ -26,3 +26,17 @@ pub struct GenericResponse<T> {
     pub errors: Vec<String>,
     pub data: Vec<T>,
 }
+
+pub trait Id {
+    fn id(&self) -> Cow<str>;
+}
+
+pub trait GetById<T> {
+    fn get_by_id(&self, id: &String) -> Option<&T>;
+}
+
+impl<T: Id> GetById<T> for GenericResponse<T> {
+    fn get_by_id(&self, id: &String) -> Option<&T> {
+        self.data.iter().find(|x| x.id().to_string().eq(id))
+    }
+}

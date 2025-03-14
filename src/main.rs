@@ -1,13 +1,16 @@
 mod hue;
+mod config;
+mod metrics;
 
 use crate::hue::client::{Client, ClientConfig};
+use crate::hue::requests::GetById;
 use clap::Parser;
-use serde::Deserialize;
-use std::collections::HashMap;
+use config::*;
+use metrics::*;
 use std::error::Error;
 use std::path::PathBuf;
 use std::process::exit;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use std::{fs, thread};
 use telegraf::{Client as TelegrafClient, Metric};
 
@@ -18,7 +21,7 @@ struct Cli {
         short,
         long,
         value_name = "FILE",
-        default_value = "/etc/hue_monitor.conf"
+        default_value = "/etc/hue_monitor.toml"
     )]
     config: PathBuf,
 
@@ -27,35 +30,6 @@ struct Cli {
     debug: u8,
 }
 
-#[derive(Deserialize)]
-struct Config {
-    #[serde(default = "default_duration")]
-    interval: Duration,
-    huebridge: BridgeConfig,
-    telegraf: TelegrafConfig,
-}
-
-#[derive(Deserialize)]
-struct BridgeConfig {
-    url: String,
-    token: String,
-    certificate: Option<PathBuf>,
-}
-
-#[derive(Deserialize)]
-struct TelegrafConfig {
-    endpoint: String,
-}
-
-#[derive(Metric)]
-#[measurement = "temperature"]
-struct Temperature {
-    temperature: f64,
-    #[telegraf(tag)]
-    device: String,
-    #[telegraf(tag)]
-    device_id: String,
-}
 
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
@@ -64,7 +38,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Using configuration file at: {:?}", cli.config);
 
     let toml_content = fs::read_to_string(cli.config)?;
-    let config: Config = toml::from_str(&toml_content)?;
+    let config = parse_config(toml_content)?;
 
     let client = Client::new(ClientConfig {
         url: config.huebridge.url.clone(),
@@ -115,26 +89,25 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn update(client: &Client, telegraf_client: &mut TelegrafClient) -> Result<(), Box<dyn Error>> {
-    let device_list = client.send(hue::requests::DevicesRequest {})?;
-    let mut device_names: HashMap<String, String> = HashMap::new();
-    let mut temperature_devices: Vec<String> = vec!();
-    for x in device_list.data {
-        device_names.insert(x.id, x.metadata.name);
+    let device_resources = client.send(hue::requests::DevicesRequest {})?;
 
-        let mut iter = x.services.iter()
+    let mut temperature_resources: Vec<String> = vec!();
+    for device_resource in &device_resources.data {
+        let mut iter = device_resource.services.iter()
             .filter(|service| service.rtype == "temperature")
             .map(|service| { service.rid.clone() })
             .collect::<Vec<String>>();
-        temperature_devices.append(&mut iter);
+        temperature_resources.append(&mut iter);
     }
 
-    for device in temperature_devices {
+    for device in temperature_resources {
         let response = client.send(hue::requests::TemperatureRequest { id: device })?;
-        if let Some(data) = response.data.get(0) {
+        if let Some(temp_device) = response.data.first() {
+            let device = device_resources.get_by_id(&temp_device.owner.rid);
             let metric = Temperature {
-                temperature: data.temperature.temperature.as_f64().unwrap(),
-                device: device_names.get(&data.owner.rid).unwrap().to_string(),
-                device_id: data.owner.rid.clone(),
+                temperature: temp_device.temperature.temperature.as_f64().unwrap(),
+                device: device.unwrap().metadata.name.clone(),
+                device_id: device.unwrap().id.clone(),
             };
 
             let res = telegraf_client.write(&metric);
@@ -143,9 +116,7 @@ fn update(client: &Client, telegraf_client: &mut TelegrafClient) -> Result<(), B
             }
         }
     }
+
     Ok(())
 }
 
-fn default_duration() -> Duration {
-    Duration::from_secs(5)
-}
