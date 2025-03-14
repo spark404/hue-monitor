@@ -2,12 +2,12 @@ mod hue;
 
 use crate::hue::client::{Client, ClientConfig};
 use clap::Parser;
-use serde::ser::StdError;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::PathBuf;
-use std::{env, fs};
+use std::time::{Duration, Instant};
+use std::{env, fs, thread};
 use telegraf::{Client as TelegrafClient, Metric};
 
 #[derive(Parser)]
@@ -75,14 +75,35 @@ fn main() -> Result<(), Box<dyn Error>> {
         certificate: parsed_toml.huebridge.certificate,
     })?;
 
-    let telegrafClient = TelegrafClient::new(&parsed_toml.telegraf.endpoint);
-    if let Err(e) = telegrafClient {
+    let telegraf_client = TelegrafClient::new(&parsed_toml.telegraf.endpoint);
+    if let Err(e) = telegraf_client {
         panic!("Failed to create Telegraf client: {:?}", e);
     }
-    let mut telegrafClient = telegrafClient.unwrap();
+    let mut telegraf_client = telegraf_client.unwrap();
 
-    let response = client.send(hue::requests::Config {})?;
-    println!("Response: {:?}", response);
+    let scheduler = thread::spawn(move || {
+        let wait_time = Duration::from_secs(5);
+        loop {
+            let start = Instant::now();
+            let runtime = start.elapsed();
+
+            if let Err(e) = update(&client, &mut telegraf_client) {
+                panic!("Failed to update process an update: {:?}", e);
+            }
+
+            if let Some(remaining) = wait_time.checked_sub(runtime) {
+                thread::sleep(remaining);
+            }
+        }
+    });
+
+    scheduler.join().expect("Scheduler panicked");
+
+    Ok(())
+}
+
+fn update(client: &Client, telegraf_client: &mut TelegrafClient) -> Result<(), Box<dyn Error>> {
+    // let response = client.send(hue::requests::Config {})?;
 
     let device_list = client.send(hue::requests::DevicesRequest {})?;
     let mut device_names: HashMap<String, String> = HashMap::new();
@@ -99,7 +120,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     for device in temperature_devices {
         let response = client.send(hue::requests::TemperatureRequest { id: device })?;
-        println!("Response: {:?}", response.data);
         if let Some(data) = response.data.get(0) {
             let metric = Temperature {
                 temperature: data.temperature.temperature.as_f64().unwrap(),
@@ -107,12 +127,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 device_id: data.owner.rid.clone(),
             };
 
-            let res = telegrafClient.write(&metric);
+            let res = telegraf_client.write(&metric);
             if let Err(e) = res {
-                println!("Failed to write telegraf metric: {:?}", e);
+                eprintln!("Failed to write telegraf metric: {:?}", e);
             }
         }
     }
-
     Ok(())
 }
+
