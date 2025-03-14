@@ -6,6 +6,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::PathBuf;
+use std::process::exit;
 use std::time::{Duration, Instant};
 use std::{fs, thread};
 use telegraf::{Client as TelegrafClient, Metric};
@@ -69,7 +70,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         url: config.huebridge.url.clone(),
         token: config.huebridge.token.clone(),
         certificate: config.huebridge.certificate.clone(),
-    })?;
+    });
+
+    if let Err(e) = client {
+        eprintln!("Error while creating telegraf client: {}", e);
+        exit(1);
+    }
+
+    let client = client?;
 
     // test the connection
     let config_response = client.send(hue::requests::Config {})?;
