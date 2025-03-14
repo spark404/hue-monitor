@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use std::{env, fs, thread};
+use std::{fs, thread};
 use telegraf::{Client as TelegrafClient, Metric};
 
 #[derive(Parser)]
@@ -28,6 +28,8 @@ struct Cli {
 
 #[derive(Deserialize)]
 struct Config {
+    #[serde(default = "default_duration")]
+    interval: Duration,
     huebridge: BridgeConfig,
     telegraf: TelegrafConfig,
 }
@@ -58,31 +60,33 @@ fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
     println!("Starting hue monitor...");
-    println!("Config: {:?}", cli.config);
-
-    let current_directory = env::current_dir()?;
-
-    // Print the current working directory
-    println!("Current working directory: {:?}", current_directory);
+    println!("Using configuration file at: {:?}", cli.config);
 
     let toml_content = fs::read_to_string(cli.config)?;
-    let parsed_toml: Config = toml::from_str(&toml_content)?;
-    println!("Configured hub: {:?}", parsed_toml.huebridge.url);
+    let config: Config = toml::from_str(&toml_content)?;
 
     let client = Client::new(ClientConfig {
-        url: parsed_toml.huebridge.url,
-        token: parsed_toml.huebridge.token,
-        certificate: parsed_toml.huebridge.certificate,
+        url: config.huebridge.url.clone(),
+        token: config.huebridge.token.clone(),
+        certificate: config.huebridge.certificate.clone(),
     })?;
 
-    let telegraf_client = TelegrafClient::new(&parsed_toml.telegraf.endpoint);
+    // test the connection
+    let config_response = client.send(hue::requests::Config {})?;
+    println!("Connected to Hue bridge: {} @ {}", config_response.name, config.huebridge.url);
+
+    let telegraf_client = TelegrafClient::new(&config.telegraf.endpoint);
     if let Err(e) = telegraf_client {
         panic!("Failed to create Telegraf client: {:?}", e);
     }
+    println!("Connected to Telegraf at: {}", config.telegraf.endpoint);
+
+    println!("Interval set to {:?}", config.interval);
+
     let mut telegraf_client = telegraf_client.unwrap();
 
     let scheduler = thread::spawn(move || {
-        let wait_time = Duration::from_secs(5);
+        let wait_time = config.interval;
         loop {
             let start = Instant::now();
             let runtime = start.elapsed();
@@ -103,8 +107,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn update(client: &Client, telegraf_client: &mut TelegrafClient) -> Result<(), Box<dyn Error>> {
-    // let response = client.send(hue::requests::Config {})?;
-
     let device_list = client.send(hue::requests::DevicesRequest {})?;
     let mut device_names: HashMap<String, String> = HashMap::new();
     let mut temperature_devices: Vec<String> = vec!();
@@ -136,3 +138,6 @@ fn update(client: &Client, telegraf_client: &mut TelegrafClient) -> Result<(), B
     Ok(())
 }
 
+fn default_duration() -> Duration {
+    Duration::from_secs(5)
+}

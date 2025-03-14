@@ -7,16 +7,16 @@ pub struct Config {}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConfigResponse {
-    name: String,
-    datastoreversion: String,
-    swversion: String,
-    apiversion: String,
-    mac: String,
-    bridgeid: String,
-    factorynew: bool,
-    replacesbridgeid: Option<String>,
-    modelid: String,
-    starterkitid: Option<String>,
+    pub name: String,
+    pub datastoreversion: String,
+    pub swversion: String,
+    pub apiversion: String,
+    pub mac: String,
+    pub bridgeid: String,
+    pub factorynew: bool,
+    pub replacesbridgeid: Option<String>,
+    pub modelid: String,
+    pub starterkitid: Option<String>,
 }
 
 impl Request for Config {
