@@ -3,11 +3,11 @@ use reqwest::blocking::Client as ReqwestClient;
 use reqwest::{header, Certificate};
 use std::fs;
 use std::path::PathBuf;
+use crate::hue::error::Error::CertificateError;
 
 #[derive(Debug, Clone)]
 pub struct Client {
     client: ReqwestClient,
-    token: String,
     url: String,
 }
 
@@ -26,7 +26,11 @@ impl Client {
         headers.insert("hue-application-key", header::HeaderValue::from_str(&config.token)?);
 
         let builder = if let Some(certificate) = config.certificate {
-            let cert = fs::read(certificate)?;
+            let cert = match fs::read(certificate) {
+                Ok(cert) => cert,
+                Err(e) =>  return Err(CertificateError(e.into()).into()),
+            };
+            
             let cert = Certificate::from_pem(&cert)?;
             builder
                 .add_root_certificate(cert)
@@ -40,7 +44,6 @@ impl Client {
         Ok(Client {
             client: builder.build()?,
             url: config.url,
-            token: config.token,
         })
     }
 

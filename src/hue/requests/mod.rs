@@ -1,6 +1,7 @@
 mod config;
 mod devices;
 mod temperature;
+mod light_level;
 
 use crate::hue::error::Error;
 pub use config::*;
@@ -9,6 +10,7 @@ use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 pub use temperature::*;
+pub use light_level::*;
 
 pub trait Request {
     type Response: for<'de> Deserialize<'de>;

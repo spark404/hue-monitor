@@ -1,5 +1,5 @@
-mod hue;
 mod config;
+mod hue;
 mod metrics;
 
 use crate::hue::client::{Client, ClientConfig};
@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::process::exit;
 use std::time::Instant;
 use std::{fs, thread};
-use telegraf::{Client as TelegrafClient, Metric};
+use telegraf::{Client as TelegrafClient};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -30,7 +30,6 @@ struct Cli {
     debug: u8,
 }
 
-
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
@@ -47,7 +46,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     });
 
     if let Err(e) = client {
-        eprintln!("Error while creating telegraf client: {}", e);
+        eprintln!("Error while creating Hue Bridge client: {}", e);
         exit(1);
     }
 
@@ -55,7 +54,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // test the connection
     let config_response = client.send(hue::requests::Config {})?;
-    println!("Connected to Hue bridge: {} @ {}", config_response.name, config.huebridge.url);
+    println!(
+        "Connected to Hue bridge: {} @ {}",
+        config_response.name, config.huebridge.url
+    );
 
     let telegraf_client = TelegrafClient::new(&config.telegraf.endpoint);
     if let Err(e) = telegraf_client {
@@ -90,33 +92,38 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn update(client: &Client, telegraf_client: &mut TelegrafClient) -> Result<(), Box<dyn Error>> {
     let device_resources = client.send(hue::requests::DevicesRequest {})?;
+    let temperature_resources = client.send(hue::requests::TemperaturesRequest {})?;
+    let light_level_resources = client.send(hue::requests::LightLevelRequest { id: None })?;
 
-    let mut temperature_resources: Vec<String> = vec!();
-    for device_resource in &device_resources.data {
-        let mut iter = device_resource.services.iter()
-            .filter(|service| service.rtype == "temperature")
-            .map(|service| { service.rid.clone() })
-            .collect::<Vec<String>>();
-        temperature_resources.append(&mut iter);
+    for resource in temperature_resources.data {
+        let device = device_resources.get_by_id(&resource.owner.rid);
+
+        let metric = TemperatureMetric {
+            temperature: resource.temperature.temperature.as_f64().unwrap(),
+            device: device.unwrap().metadata.name.clone(),
+            device_id: device.unwrap().id.clone(),
+        };
+
+        let res = telegraf_client.write(&metric);
+        if let Err(e) = res {
+            eprintln!("Failed to write telegraf metric: {:?}", e);
+        }
     }
 
-    for device in temperature_resources {
-        let response = client.send(hue::requests::TemperatureRequest { id: device })?;
-        if let Some(temp_device) = response.data.first() {
-            let device = device_resources.get_by_id(&temp_device.owner.rid);
-            let metric = Temperature {
-                temperature: temp_device.temperature.temperature.as_f64().unwrap(),
-                device: device.unwrap().metadata.name.clone(),
-                device_id: device.unwrap().id.clone(),
-            };
+    for resource in light_level_resources.data {
+        let device = device_resources.get_by_id(&resource.owner.rid);
 
-            let res = telegraf_client.write(&metric);
-            if let Err(e) = res {
-                eprintln!("Failed to write telegraf metric: {:?}", e);
-            }
+        let metric = LightLevelMetric {
+            light_level: resource.light.light_level.as_i64().unwrap(),
+            device: device.unwrap().metadata.name.clone(),
+            device_id: device.unwrap().id.clone(),
+        };
+
+        let res = telegraf_client.write(&metric);
+        if let Err(e) = res {
+            eprintln!("Failed to write telegraf metric: {:?}", e);
         }
     }
 
     Ok(())
 }
-

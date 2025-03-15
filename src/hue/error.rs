@@ -11,6 +11,7 @@ pub enum Error {
     Parsing(Box<dyn StdError + 'static>),
     Json(JsonError),
     Io(IoError),
+    CertificateError(Box<dyn StdError + 'static>)
 }
 impl From<ReqwestError> for Error {
     fn from(error: ReqwestError) -> Self {
@@ -35,6 +36,9 @@ impl Display for Error {
             Error::Io(ref cause) => write!(
                 formatter, "I/O error: {}", cause
             ),
+            Error::CertificateError(ref cause) => write!(
+                formatter, "Error parsing certificate: {}", cause
+            )
         }
     }
 }
@@ -46,6 +50,7 @@ impl StdError for Error {
             Error::Parsing(ref cause) => Some(&**cause),
             Error::Json(ref cause) => Some(cause),
             Error::Io(ref cause) => Some(cause),
+            Error::CertificateError(ref cause) => Some(&**cause)
         }
     }
 }
